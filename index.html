@@ -222,6 +222,12 @@
     .dialog p{margin:0 0 20px;color:var(--fg2);font-size:14px}
     .dialog-actions{display:flex;gap:8px;justify-content:flex-end}
     .dialog-actions .btn{width:auto}
+    .dialog .input{margin:8px 0 12px}
+    .access-badge{
+      display:inline-flex;align-items:center;gap:6px;padding:4px 8px;border-radius:999px;
+      background:var(--accent-light);color:var(--primary);font-size:11px;font-weight:700;
+    }
+    .access-badge.off{background:var(--muted);color:var(--fg2)}
 
     /* ---- Course Viewer ---- */
     #course-viewer{
@@ -588,6 +594,20 @@
   </div>
 </div>
 
+<!-- ===================== REVIEWER ACCESS ===================== -->
+<div class="dialog-overlay" id="reviewer-dialog" style="display:none">
+  <div class="dialog">
+    <h3>Reviewer Access</h3>
+    <p>Enter the Google Play reviewer code to unlock every edition, premium feature, and ad-free access on this device.</p>
+    <input type="password" class="input" id="reviewer-code-input" aria-label="Reviewer code" placeholder="Reviewer code" autocomplete="one-time-code" onkeydown="if(event.key==='Enter')submitReviewerCode()"/>
+    <p id="reviewer-error" class="text-sm" style="display:none;margin:0;color:var(--destructive)"></p>
+    <div class="dialog-actions">
+      <button class="btn btn-ghost" onclick="closeReviewerAccess()">Cancel</button>
+      <button class="btn btn-primary" onclick="submitReviewerCode()">Unlock</button>
+    </div>
+  </div>
+</div>
+
 <!-- ===================== COURSE VIEWER ===================== -->
 <div id="course-viewer">
   <div style="width:100%;display:flex;justify-content:flex-end;margin-bottom:12px">
@@ -771,6 +791,8 @@ const MAX_HOLES = 18;
 const FREE_HOLES = 3;
 const MAX_PLAYERS = 8;
 const STRIPE_LINK = 'https://buy.stripe.com/7sYeVc82N7czdPqaQ20Jq00';
+const REVIEWER_MODE_KEY = 'pftc_reviewer_mode';
+const REVIEWER_CODES = ['PFTC-REVIEW-2026', 'GOOGLE-PLAY-REVIEW', 'PARFORTHECOURSE-REVIEW'];
 const LOGO_URL = 'https://prometheangamescom.wordpress.com/wp-content/uploads/2025/08/400x400.png';
 const LEADER_ICON_URL = 'https://prometheangamescom.wordpress.com/wp-content/uploads/2025/08/unnamed-file.png';
 const COLORS = ['#ef4444','#3b82f6','#22c55e','#f59e0b','#a855f7','#ec4899','#14b8a6','#f97316'];
@@ -850,10 +872,57 @@ let timerInterval=null;
 /* ============================================================
    UNLOCK / PAYWALL
    ============================================================ */
+function isReviewerMode(){
+  return localStorage.getItem(REVIEWER_MODE_KEY)==='true';
+}
+function hasPremiumAccess(){
+  return isReviewerMode() || localStorage.getItem('pftc_unlocked')==='true';
+}
 function isUnlocked(){
-  return localStorage.getItem('pftc_unlocked')==='true';
+  return hasPremiumAccess();
+}
+function normalizeReviewerCode(value){
+  return String(value||'').trim().toUpperCase().replace(/\s+/g,'');
+}
+function openReviewerAccess(){
+  const dialog=document.getElementById('reviewer-dialog');
+  const input=document.getElementById('reviewer-code-input');
+  const error=document.getElementById('reviewer-error');
+  if(error){error.style.display='none';error.textContent='';}
+  if(input){input.value='';setTimeout(()=>input.focus(),0);}
+  if(dialog) dialog.style.display='flex';
+}
+function closeReviewerAccess(){
+  const dialog=document.getElementById('reviewer-dialog');
+  const error=document.getElementById('reviewer-error');
+  if(dialog) dialog.style.display='none';
+  if(error){error.style.display='none';error.textContent='';}
+}
+function reviewerError(message){
+  const error=document.getElementById('reviewer-error');
+  if(!error) return;
+  error.textContent=message;
+  error.style.display='block';
+}
+function submitReviewerCode(){
+  const input=document.getElementById('reviewer-code-input');
+  const code=normalizeReviewerCode(input?.value);
+  if(!code){
+    reviewerError('Enter a reviewer code to continue.');
+    return;
+  }
+  if(REVIEWER_CODES.includes(code)){
+    localStorage.setItem(REVIEWER_MODE_KEY,'true');
+    closeReviewerAccess();
+    render();
+    alert('Reviewer Mode enabled. All premium features are now unlocked on this device.');
+    return;
+  }
+  localStorage.removeItem(REVIEWER_MODE_KEY);
+  reviewerError('That reviewer code is not valid. Reviewer Mode remains disabled.');
 }
 function unlockGame(){
+  if(hasPremiumAccess()) return;
   const url=new URL(STRIPE_LINK);
   url.searchParams.set('client_reference_id','standalone');
   window.open(url.toString(),'_blank');
@@ -1292,7 +1361,7 @@ function renderGameTab(){
   if(!cp) return;
   const cs=getCurrentScore();
   const hole=g.hole;
-  const holeLocked=!isUnlocked()&&hole>FREE_HOLES;
+  const holeLocked=!hasPremiumAccess()&&hole>FREE_HOLES;
   const card=getDrawnCard(hole);
   const isJoker=card&&card.isJoker;
 
@@ -1519,7 +1588,7 @@ function renderSummaryTab(){
   const bodyRows=lb.map(e=>{
     const ps=g.scores[e.player.id]||[];
     const holeCells=allHoles.map(h=>{
-      const locked=!isUnlocked()&&h>FREE_HOLES;
+      const locked=!hasPremiumAccess()&&h>FREE_HOLES;
       if(locked) return '<td>🔒</td>';
       const hs=ps.find(s=>s.hole===h);
       if(!hs) return '<td>-</td>';
@@ -1558,7 +1627,7 @@ function renderSummaryTab(){
           </table>
         </div>
       </div>
-      ${!isUnlocked()&&allHoles.some(h=>h>FREE_HOLES)?`<div class="card mb-3" style="border-color:var(--primary)">
+      ${!hasPremiumAccess()&&allHoles.some(h=>h>FREE_HOLES)?`<div class="card mb-3" style="border-color:var(--primary)">
         <p style="margin:0 0 10px;color:var(--fg2);font-size:14px">Unlock all 18 holes to play a full round!</p>
         <button class="btn btn-primary" onclick="unlockGame()">Unlock Full Game</button>
       </div>`:''}
@@ -1680,6 +1749,17 @@ function renderSettingsTab(){
           <div class="setting-info"><h4>Auto-Save</h4><p>Automatically save game progress</p></div>
           <button class="toggle ${s.autoSave?'on':''}" onclick="toggleAutoSave()"></button>
         </div>
+      </div>
+      <div class="card settings-card">
+        <h3 style="margin:0 0 4px;font-size:14px;font-weight:600">Reviewer Access</h3>
+        <div class="setting-row">
+          <div class="setting-info">
+            <h4>Reviewer Mode</h4>
+            <p>${isReviewerMode()?'Enabled for this device':'Enter a Google Play reviewer code to unlock all premium content'}</p>
+          </div>
+          <span class="access-badge ${isReviewerMode()?'':'off'}">${isReviewerMode()?'Active':'Off'}</span>
+        </div>
+        <button class="btn btn-outline w-full" onclick="openReviewerAccess()">${isReviewerMode()?'Update Code':'Enter Reviewer Code'}</button>
       </div>
       <div class="card settings-card">
         <h3 style="margin:0 0 8px;font-size:14px;font-weight:600">About</h3>
@@ -1819,7 +1899,7 @@ function openPrivacy(){document.getElementById('privacy-overlay').classList.add(
 function closePrivacy(){document.getElementById('privacy-overlay').classList.remove('open');}
 function deleteAllData(){
   if(!confirm('Delete ALL app data? This cannot be undone.')) return;
-  const keys=['currentGame','savedGames','pftc_unlocked','appScreen','appActiveTab','appViewOnly','setupTimes','pftc_leveler_tutorial_seen'];
+  const keys=['currentGame','savedGames','pftc_unlocked','pftc_reviewer_mode','appScreen','appActiveTab','appViewOnly','setupTimes','pftc_leveler_tutorial_seen'];
   keys.forEach(k=>localStorage.removeItem(k));
   for(let i=0;i<localStorage.length;i++){
     const k=localStorage.key(i);
